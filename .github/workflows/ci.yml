@@ -26,7 +26,8 @@ jobs:
       - run: cmake --build build -j
       - name: benchmark
         run: |
-          nproc
-          ./build/stealpool_bench --reps 5 | tee bench.txt
+          nproc | tee bench.txt
+          ./build/stealpool_bench --reps 5 | tee -a bench.txt
           ./build/quicksort | tee -a bench.txt
+          .github/run_and_report.sh bench cat bench.txt
           cat bench.txt >> "$GITHUB_STEP_SUMMARY"
