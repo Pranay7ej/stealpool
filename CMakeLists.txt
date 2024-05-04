@@ -1,0 +1,50 @@
+cmake_minimum_required(VERSION 3.16)
+project(stealpool CXX)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+if(NOT CMAKE_BUILD_TYPE)
+  set(CMAKE_BUILD_TYPE RelWithDebInfo)
+endif()
+
+option(STEALPOOL_BUILD_TESTS "Build tests" ON)
+set(STEALPOOL_SANITIZE "" CACHE STRING "Sanitizer to build with (address, thread, ...)")
+if(STEALPOOL_SANITIZE)
+  add_compile_options(-fsanitize=${STEALPOOL_SANITIZE} -fno-omit-frame-pointer)
+  add_link_options(-fsanitize=${STEALPOOL_SANITIZE})
+  if(STEALPOOL_SANITIZE STREQUAL "thread" AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    # The two parking fences are fine; TSan just can't model fences, and GCC says so.
+    add_compile_options(-Wno-tsan)
+  endif()
+endif()
+
+find_package(Threads REQUIRED)
+
+add_library(stealpool src/scheduler.cc)
+target_include_directories(stealpool PUBLIC include)
+target_compile_options(stealpool PRIVATE -Wall -Wextra -Wpedantic)
+target_link_libraries(stealpool PUBLIC Threads::Threads)
+
+add_executable(stealpool_bench bench/bench.cc)
+target_link_libraries(stealpool_bench PRIVATE stealpool)
+add_executable(quicksort examples/quicksort.cc)
+target_link_libraries(quicksort PRIVATE stealpool)
+
+if(STEALPOOL_BUILD_TESTS)
+  enable_testing()
+  find_package(GTest QUIET)
+  if(NOT GTest_FOUND)
+    include(FetchContent)
+    FetchContent_Declare(googletest
+      URL https://github.com/google/googletest/archive/refs/tags/v1.14.0.tar.gz)
+    set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
+    FetchContent_MakeAvailable(googletest)
+  endif()
+  add_executable(stealpool_tests tests/deque_test.cc tests/scheduler_test.cc)
+  target_link_libraries(stealpool_tests PRIVATE stealpool GTest::gtest_main)
+  include(GoogleTest)
+  gtest_discover_tests(stealpool_tests)
+  # Races are timing dependent; run the suite a few times over.
+  add_test(NAME stress_repeat COMMAND stealpool_tests --gtest_repeat=20)
+endif()
