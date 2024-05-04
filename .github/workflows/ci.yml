@@ -1,0 +1,32 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        sanitize: ["", "address", "thread"]
+    name: test (${{ matrix.sanitize || 'plain' }})
+    steps:
+      - uses: actions/checkout@v5
+      - run: cmake -S . -B build -DSTEALPOOL_SANITIZE=${{ matrix.sanitize }}
+      - run: cmake --build build -j
+      - run: ctest --test-dir build --output-on-failure
+
+  bench:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DSTEALPOOL_BUILD_TESTS=OFF
+      - run: cmake --build build -j
+      - name: benchmark
+        run: |
+          nproc
+          ./build/stealpool_bench --reps 5 | tee bench.txt
+          ./build/quicksort | tee -a bench.txt
+          cat bench.txt >> "$GITHUB_STEP_SUMMARY"
