@@ -54,22 +54,23 @@ CI runs the tests plain, with ASan and with TSan, and repeats the whole suite 20
 
 ## numbers
 
-`stealpool_bench` compares against running serially and against the usual first-attempt thread pool (one `std::deque` behind a mutex). best of 3 on a 2 core VM:
+`stealpool_bench` compares against running serially and against the usual first-attempt thread pool (one `std::deque` behind a mutex). best of 5, from the CI bench job (GitHub runner, 4 vCPUs):
 
 | workload | serial ms | central queue ms | stealpool ms | speedup vs serial |
 |---|---:|---:|---:|---:|
-| fib(36), cutoff 20 | 31.3 | 17.1 | 16.6 | 1.89x |
-| unbalanced tree | 106.5 | 59.4 | 53.7 | 1.98x |
-| 1M empty tasks, spawned in a loop | - | 317.5 | 334.3 | 0.9x vs central |
-| same 1M items via ParallelFor, grain 1024 | - | - | 16.0 | 21x vs loop |
-| reduce 16M doubles | 154.9 | - | 62.4 | 2.48x |
+| fib(36), cutoff 20 | 28.5 | 19.2 | 14.1 | 2.02x |
+| unbalanced tree | 90.6 | 25.7 | 23.4 | 3.86x |
+| 1M empty tasks, spawned in a loop | - | 526.2 | 145.9 | 3.6x vs central |
+| same 1M items via ParallelFor, grain 1024 | - | - | 23.4 | 6x vs loop |
+| reduce 16M doubles | 165.8 | - | 56.4 | 2.94x |
 
-(the 2.48x on reduce is above 2 on 2 cores, which is probably noise on a shared VM.)
+parallel quicksort on 20M ints: 589 ms vs 1507 ms for `std::sort`.
 
 what I learned from this:
-- on 2 cores the central queue is honestly not much worse. the lock only really hurts with more cores fighting over it
-- spawning a million tiny tasks in a flat loop is the worst case for work stealing: one worker pushes, the other steals almost every single task, so you pay a CAS plus a cross-thread free per task. ParallelFor splits the range in halves instead, so there are only a few steals and it's 21x faster
-- per-task cost is dominated by `new`/`delete` of the task object. a per-worker free list would be the next thing to do
+- the central queue is fine for coarse tasks (the tree), but with lots of small tasks every worker fights over one lock. at 4 threads it's 3.6x slower than stealing on the empty-task test. on my 2 core VM the two were about even, so the lock only really starts to hurt with more cores
+- spawning a million tiny tasks in a flat loop is still the worst case for work stealing: one worker pushes and the others steal nearly every task one at a time. ParallelFor splits the range in halves instead, so there are only a few steals and it's 6x faster
+- fib stops scaling at 2 threads (1: 28.5 ms, 2: 14.4, 4: 14.1) while the tree gets close to 4x. my guess is those 4 vCPUs are 2 physical cores with hyperthreading: fib is tight add/branch code that fills a core by itself, while the tree's work is a chain of dependent multiplies that leaves room for the sibling thread. haven't verified that
+- per-task cost is mostly `new`/`delete` of the task object. a per-worker free list would be the next thing to do
 
 ## not done
 - no task priorities or affinity
